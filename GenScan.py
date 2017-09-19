@@ -15,8 +15,12 @@ import socket
 import errno
 from urlparse import urlparse
 import json
+import requests
 
 
+# disable SSL messages: InsecureRequestWarning: Unverified HTTPS request is being made. Adding certificate verification is strongly advised.
+from requests.packages.urllib3.exceptions import InsecureRequestWarning  # @UnresolvedImport
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)  # @UndefinedVariable
 
 
 
@@ -31,9 +35,9 @@ config = {
 #     'logging_format'    : '%(asctime)s   %(levelname)-8s %(message)s',
     'logging_format'    : '%(message)s',
     'plugin_directory'  : './plugins',
-    'socket_timetout'   : 5,  # timeout in seconds that the program will wait to open a connection
+    'socket_timeout'    : 5,  # timeout in seconds that the program will wait to open a connection
     'jason_output'      : False,
-    'thread_numbers'    : 100,
+    'thread_numbers'    : 150,
     }
 
 
@@ -136,16 +140,21 @@ class BasePlugin (object):
             socket.gethostbyname_ex(host)
         except socket.gaierror as err:
             return "DNS_ERROR -> %s" % err
-    
-        s = socket.socket()
-        s.settimeout(config['socket_timeout'])
-        result = s.connect_ex((host, port))
-        if result == 0: return 'OK'
-        else: return 'ERROR_CODE=[%s] ERROR_MSG=[%s] ' % (str(result), errno.errorcode[result])        
+
+        try:
+            s = socket.socket()
+            s.settimeout(config['socket_timeout'])
+            result = s.connect_ex((host, port))
+            if result == 0: return 'OK'
+            else: return 'ERROR_CODE=[%s] ERROR_MSG=[%s] ' % (str(result), errno.errorcode[result])
+        except Exception as e:
+            return "CONNECTIVITY_ERROR [%s]" % (str(e))
+            
+       
         
-    def url_parse(self):
+    def url_parse(self, app):
         ''' extract all information from an URL '''
-        uparse = urlparse(self.app)
+        uparse = urlparse(app)
         self.proto = uparse.scheme
         self.host = uparse.netloc
         self.port = uparse.port

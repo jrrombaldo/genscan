@@ -2,3 +2,6 @@
 /.pydevproject
 /apps.txt
 *.pyc 
+/.DS_Store
+/webdav.py
+/targets.txt

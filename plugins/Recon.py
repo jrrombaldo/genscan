@@ -31,13 +31,25 @@ headers = [
 
 class Recon (BasePlugin):
     def validate(self, app): 
-        
         result = {}
+        
+        if not str(app).lower().startswith("http"):
+            self.validate("https://"+app)
+            app = "http://"+app
         try:
             result['app']               = app
-            self.app                    = app
+            self.url_parse(app)
+           
+            result['connectivity_test'] = self.test_connectiviy(self.host, self.port)
             
-            self.url_parse()  
+            response = requests.options(app, timeout=10, verify=False)
+            result['all_headers']       = response.headers
+            result['important_headers'] = self.extract_headers(response)
+            result['req_url']           = response.request.url         
+            result['req_method']        = response.request.method         
+            result['status_code']       = response.status_code
+            result['request_status']    = 'SUCCESS'
+            
             result['proto']             = self.proto
             result['host']              = self.host
             result['port']              = self.port
@@ -45,13 +57,6 @@ class Recon (BasePlugin):
             result['query_string']      = self.query
                  
 
-            response = requests.options(self.app, timeout=10)
-            result['headers']           = self.extract_headers(response)
-            result['req_url']           = response.request.url         
-            result['req_method']        = response.request.method         
-            result['status_code']       = response.status_code
-            result['request_status']    = 'SUCCESS'
-            
         except Exception as e:
             result['request_status']        = 'ERROR'
             result['request_error_details'] =   str(e)
@@ -65,6 +70,7 @@ class Recon (BasePlugin):
             if header in response.headers: headers_found[header] = response.headers[header]
         return headers_found
     
+
         
         
 if __name__ == '__main__':
