@@ -1,13 +1,13 @@
 '''
 Created on 24 Jul 2017
 
-@author: junior
+@author: Jr.Rombaldo
 '''
 
 import time
 import random
 
-from CJ_Framework import BasePlugin
+from GenScan import BasePlugin
 
 class Inside (BasePlugin):
     def validate(self, app):

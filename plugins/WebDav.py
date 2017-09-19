@@ -4,7 +4,7 @@ Created on 24 Jul 2017
 @author: junior
 '''
 
-from CJ_Framework import BasePlugin
+from GenScan import BasePlugin
 import random
 
 class WebDav(BasePlugin):

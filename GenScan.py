@@ -11,6 +11,10 @@ import logging
 import sys
 from importlib import import_module
 import os
+import socket
+import errno
+from urlparse import urlparse
+import json
 
 
 
@@ -23,9 +27,13 @@ import os
 config = {
     'line_size'         : 1,
     'result_format'     : '{app:25} -> {result}',
-    'logging_level'     : logging.DEBUG,
-    'logging_format'    : '%(asctime)s   %(levelname)-8s %(message)s',
-    'plugin_directory'  : './plugins'
+    'logging_level'     : logging.INFO,
+#     'logging_format'    : '%(asctime)s   %(levelname)-8s %(message)s',
+    'logging_format'    : '%(message)s',
+    'plugin_directory'  : './plugins',
+    'socket_timetout'   : 5,  # timeout in seconds that the program will wait to open a connection
+    'jason_output'      : False,
+    'thread_numbers'    : 100,
     }
 
 
@@ -101,40 +109,60 @@ class GS_ThreadPool:
 #############  
 
 def list_available_plugins():
-    plugins_array =[]
+    plugins_array = []
     for pl in os.listdir(config['plugin_directory']): 
-        if pl.find('.py') >0 and pl.find('.pyc') <1 and pl != '__init__.py': 
-            plugins_array.append(pl.replace('.py',''))
+        if pl.find('.py') > 0 and pl.find('.pyc') < 1 and pl != '__init__.py': 
+            plugins_array.append(pl.replace('.py', ''))
     return plugins_array
     
 
+
 class BasePlugin (object):
     
-    SAFE = 0
-    VULNERABLE = 1
-    NOT_SURE = 2
-    ERROR = 3
-    
-    result = {
-        0: "SAFE",
-        1: "VULNERABLE",
-        2: "NOT_SURE",
-        3: "ERROR"
-    }
-    
-    def output(self, msg):
-        safeOutput(msg)
-
     def validate(self, app):
         """ >>> TO BE IMPLEMENTED <<<"""
         
+        
+    def output(self, msg):
+        if config['jason_output']:
+            json.dumps( msg, indent=3)
+        else:
+            safeOutput(msg)
+        
+
+    def test_connectiviy(self, host, port):
+        ''' test host DNS resolution and test if the open is open and reacheable '''
+        try:
+            socket.gethostbyname_ex(host)
+        except socket.gaierror as err:
+            return "DNS_ERROR -> %s" % err
     
-    def process_result(self, app, result):
-        self.output(config['result_format'].format(**{'app':app, 'result':BasePlugin.result.get(result)}))
+        s = socket.socket()
+        s.settimeout(config['socket_timeout'])
+        result = s.connect_ex((host, port))
+        if result == 0: return 'OK'
+        else: return 'ERROR_CODE=[%s] ERROR_MSG=[%s] ' % (str(result), errno.errorcode[result])        
         
-    def process_err(self, app, err):
-        self.output(config['result_format'].format(**{'app':app, 'result':(self.ERROR+' - '+err)}))
+    def url_parse(self):
+        ''' extract all information from an URL '''
+        uparse = urlparse(self.app)
+        self.proto = uparse.scheme
+        self.host = uparse.netloc
+        self.port = uparse.port
+        self.path = uparse.path
+        self.query = uparse.query
         
+        if  self.port == None and self.proto != None:
+            if self.proto == 'https':   self.port = 443
+            if self.proto == 'http':    self.port = 80
+            
+        if self.port != None and self.proto == None:
+            if self.port == 80 or self.port == 8080:    self.proto = 'http'
+            if self.port == 443 or self.port == 8443:    self.proto = 'https'
+        
+
+        
+
         
 def load_plugin(plugin_name):
     safeOutput('Loading plugin: %s' % plugin_name)
@@ -175,14 +203,50 @@ def test_threads_n_plugins():
     # making sure the program will wait until all jobs have been completed
     pool.wait_completion()
 
+def usage():
+    print "python genscan.py <plugin> <applications_file>"
+    exit(1)
+
+
 
 
 
 if __name__ == '__main__':
 #     test_threads_n_plugins()
-#     for pl in os.listdir('plugins'): 
-#         if pl.find('.py') >0 and pl.find('.pyc') <1 and pl != '__init__.py': print pl.replace('.py','')
-    print list_available_plugins()
+
+    if len(sys.argv) < 3:
+        usage()
+        
+    # checking if pluing exists
+    plugin = sys.argv[1]
+    plugin_list = list_available_plugins()
+    if plugin not in plugin_list:
+        print '\ninvalid plugin [{0}], available options are: {1}\n\n'.format(plugin, plugin_list)
+        exit(1)
+    else:
+        plugin_call = load_plugin(plugin)
+        
+    # checking if apps file is existent
+    apps_file = sys.argv[2]
+    if not os.path.isfile(apps_file):
+        print '\ninvalid/non-existing  file [apps_file]\n\n'
+        exit(1)
+    
+    
+        
+    
+    
+    thread_pool = GS_ThreadPool(config['thread_numbers'])
+
+    
+    
+    #reading apps file  and launching
+    for app in open(apps_file).read().splitlines():
+        if len(app) > 2 : thread_pool.add_task(plugin_call, app)
+        
+    thread_pool.wait_completion()
+
+    
 
 
    
