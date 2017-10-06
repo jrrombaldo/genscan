@@ -6,6 +6,10 @@ Created on 24 Jul 2017
 
 
 from GenScan import BasePlugin
+<<<<<<< HEAD
+=======
+import requests
+>>>>>>> branch 'master' of ssh://git@github.com/jrrombaldo/genscan.git
 import re
 
 # extracted from https://www.owasp.org/index.php/OWASP_Secure_Headers_Project#tab=Headers
