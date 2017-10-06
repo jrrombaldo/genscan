@@ -6,7 +6,7 @@ Created on 24 Jul 2017
 
 
 from GenScan import BasePlugin
-import requests
+import re
 
 # extracted from https://www.owasp.org/index.php/OWASP_Secure_Headers_Project#tab=Headers
 headers = [
@@ -36,13 +36,16 @@ class Recon (BasePlugin):
         if not str(app).lower().startswith("http"):
             self.validate("https://"+app)
             app = "http://"+app
+            
+            
         try:
             result['app']               = app
             self.url_parse(app)
            
             result['connectivity_test'] = self.test_connectiviy(self.host, self.port)
             
-            response = requests.options(app, timeout=10, verify=False)
+            response =  self.request('OPTION', app)
+
             result['all_headers']       = response.headers
             result['important_headers'] = self.extract_headers(response)
             result['req_url']           = response.request.url         
@@ -55,7 +58,8 @@ class Recon (BasePlugin):
             result['port']              = self.port
             result['path']              = self.path
             result['query_string']      = self.query
-                 
+            
+            result['optionsbleed'] = self.optionsbleed(response.headers)
 
         except Exception as e:
             result['request_status']        = 'ERROR'
@@ -71,6 +75,35 @@ class Recon (BasePlugin):
         return headers_found
     
 
+
+    def optionsbleed(self, headers):
+        try:
+            if not 'Allow' in headers:
+                return "[empty]"
+            
+            allow = str(headers["Allow"])
+    
+            if allow == "":
+                return "[empty]"
+            elif re.match("^[a-zA-Z]+(-[a-zA-Z]+)? *(, *[a-zA-Z]+(-[a-zA-Z]+)? *)*$", allow):
+                z = [x.strip() for x in allow.split(',')]
+                if len(z) > len(set(z)):
+                    return "[duplicates] %s " % ( repr(allow))
+            elif re.match("^[a-zA-Z]+(-[a-zA-Z]+)? *( +[a-zA-Z]+(-[a-zA-Z]+)? *)+$", allow):
+                return "[spaces] %s: %s" % (repr(allow))
+            else:
+                return "[bleed] %s" % (repr(allow))
+            
+            return '[OK]'
+        
+        except Exception as e:
+            return str(e)
+            
+    
+#                  "[bleed] corrupted header found, vulnerable\"
+#                  "[empty] empty allow header, does not make sense"
+#                  "[spaces] space-separated method list (should be comma-separated)"
+#                  "[duplicates] duplicates in list (may be apache bug 61207)"
         
         
 if __name__ == '__main__':

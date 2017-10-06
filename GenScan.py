@@ -16,6 +16,7 @@ import errno
 from urlparse import urlparse
 import json
 import requests
+import argparse
 
 
 # disable SSL messages: InsecureRequestWarning: Unverified HTTPS request is being made. Adding certificate verification is strongly advised.
@@ -28,16 +29,22 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)  # @Undefined
 #######  GLOBALCONFIGURATION SECTION
 #############
 
-config = {
-    'line_size'         : 1,
-    'result_format'     : '{app:25} -> {result}',
-    'logging_level'     : logging.INFO,
-#     'logging_format'    : '%(asctime)s   %(levelname)-8s %(message)s',
-    'logging_format'    : '%(message)s',
-    'plugin_directory'  : './plugins',
-    'socket_timeout'    : 5,  # timeout in seconds that the program will wait to open a connection
-    'jason_output'      : False,
-    'thread_numbers'    : 150,
+_config = {
+    'line_size'                 : 1,
+    'result_format'             : '{app:25} -> {result}',
+    'logging_level'             : logging.INFO,
+#     'logging_format'            : '%(asctime)s   %(levelname)-8s %(message)s',
+    'logging_format'            : '%(message)s',
+    'plugin_directory'          : './plugins',
+
+    'proxy'                     : None,        
+    'follow_redirection'        : True,
+    'verify_ssl_server_cert'    : False,
+    'socket_timeout'            : 5,  # timeout in seconds that the program will wait to open a connection
+    'http_timeout'              : 5,
+    'thread_numbers'            : 150,
+    
+    'jason_output'              : False,
     }
 
 
@@ -46,7 +53,7 @@ config = {
 #######  LOGGING CONFIGURATION
 #############
 
-logging.basicConfig(format=config['logging_format'], level=config['logging_level'], stream=sys.stdout)
+logging.basicConfig(format=_config['logging_format'], level=_config['logging_level'], stream=sys.stdout)
 
 log_lock = threading.Condition()
 
@@ -85,7 +92,7 @@ class GS_Thread(threading.Thread):
             try: 
                 func(*args, **kargs)
             except Exception, e: 
-                print e
+                safeOutput( 'thread error: [%s]' % e,  logging.ERROR)
             self.tasks.task_done()
 
 
@@ -114,7 +121,7 @@ class GS_ThreadPool:
 
 def list_available_plugins():
     plugins_array = []
-    for pl in os.listdir(config['plugin_directory']): 
+    for pl in os.listdir(_config['plugin_directory']): 
         if pl.find('.py') > 0 and pl.find('.pyc') < 1 and pl != '__init__.py': 
             plugins_array.append(pl.replace('.py', ''))
     return plugins_array
@@ -128,7 +135,7 @@ class BasePlugin (object):
         
         
     def output(self, msg):
-        if config['jason_output']:
+        if _config['jason_output']:
             json.dumps( msg, indent=3)
         else:
             safeOutput(msg)
@@ -143,12 +150,35 @@ class BasePlugin (object):
 
         try:
             s = socket.socket()
-            s.settimeout(config['socket_timeout'])
+            s.settimeout(_config['socket_timeout'])
             result = s.connect_ex((host, port))
             if result == 0: return 'OK'
             else: return 'ERROR_CODE=[%s] ERROR_MSG=[%s] ' % (str(result), errno.errorcode[result])
         except Exception as e:
             return "CONNECTIVITY_ERROR [%s]" % (str(e))
+       
+        
+    def request(self, http_method, url, headers=None, files=None, data={}, params={}, auth=None, cookies=None,  redirect=False,  hooks=None, config=None, _poolmanager=None, session=None):
+        """
+        execute the request following the interface defined at: http://docs.python-requests.org/en/v0.10.6/api/#main-interface
+        """
+        return requests.request(method=http_method, url=url, 
+                        headers=headers, 
+                         files=files, 
+                         data=data, 
+                         params=params, 
+                         auth=auth, 
+                         cookies=cookies, 
+                         timeout=_config['http_timeout'], 
+#                          redirect=redirect, 
+                         allow_redirects=_config['follow_redirection'], 
+                         proxies = _config['proxy'], 
+                         hooks=hooks, 
+#                          config=config, 
+#                          _poolmanager=_poolmanager, 
+                         verify=_config['verify_ssl_server_cert'], 
+#                          session=session
+                         )
             
        
         
@@ -212,50 +242,67 @@ def test_threads_n_plugins():
     # making sure the program will wait until all jobs have been completed
     pool.wait_completion()
 
-def usage():
-    print "python genscan.py <plugin> <applications_file>"
-    exit(1)
 
 
-
-
-
-if __name__ == '__main__':
-#     test_threads_n_plugins()
-
-    if len(sys.argv) < 3:
-        usage()
-        
-    # checking if pluing exists
-    plugin = sys.argv[1]
+def parse_cli_args():
     plugin_list = list_available_plugins()
-    if plugin not in plugin_list:
-        print '\ninvalid plugin [{0}], available options are: {1}\n\n'.format(plugin, plugin_list)
-        exit(1)
-    else:
-        plugin_call = load_plugin(plugin)
-        
-    # checking if apps file is existent
-    apps_file = sys.argv[2]
-    if not os.path.isfile(apps_file):
+     
+    parser = argparse.ArgumentParser(
+         description="\n\nGenScan aims to be an enterprise-level framework to support scan to support any validation/reconnaissance against a high number of web applications."
+            "\nBecause it has performance and scalability in mind, it offers advanced thread-pooling techniques in addition to its pluggable code."
+            "\nAny desired validation is achieved by creating a small plugin with the validation checks only. GenScan will be responsible for delivery this plugin to each target applications in a timely fashion.",
+         
+         epilog=" Currently, GenScan it is in development...",
+         formatter_class=argparse.RawTextHelpFormatter)
+    
+    
+    parser.add_argument('plugin',  choices=plugin_list, metavar='plugin', action='store', help='One of the available plugins: %s' % plugin_list)
+    parser.add_argument('targets',  action='store', help='file containing applications to be scanned. One application per line.')
+    
+    formats = ['JSON', 'CSV', 'TXT']
+    parser.add_argument('-t', "--threads",  type=int, default=_config['thread_numbers'], help='Number of concurrent threads, (default %s)' % _config['thread_numbers'], metavar='')
+    parser.add_argument('-o', "--output",  choices=formats, help="Specify output format, default is JSON, validations are %s" % formats, metavar='')
+    parser.add_argument("--disable-redirection", action='store_true', help="Speicify if genscan should or not follow a server redirection, normally status code 301/302. By default the script do not follows redirections")
+    parser.add_argument('-p', "--proxy", action='store_true', help="Specify HTTP proxy to be used, the expected format is \"{'http': 'localhost:9999', 'https': 'localhost:9999'}\" ")
+    
+    args = parser.parse_args()
+    
+    _config['thread_numbers']       = int(args.threads)
+    target                          = args.targets
+    plugin                          = args.plugin
+    _config['proxy ']               = args.proxy
+    _config['disable_redirection']  = args.disable_redirection
+    _config['output_format']        = args.threads
+    
+    # checking if target file is existent
+    if not os.path.isfile(target):
         print '\ninvalid/non-existing  file [apps_file]\n\n'
         exit(1)
     
-    
-        
-    
-    
-    thread_pool = GS_ThreadPool(config['thread_numbers'])
+    return target, plugin
 
+
+if __name__ == '__main__':
+    target_file, plugin = parse_cli_args()
     
-    
-    #reading apps file  and launching
-    for app in open(apps_file).read().splitlines():
+    plugin_call = load_plugin(plugin)
+
+    thread_pool = GS_ThreadPool(_config['thread_numbers'])
+     
+#    filling threadpool with apps at targets file
+    for app in open(target_file).read().splitlines():
         if len(app) > 2 : thread_pool.add_task(plugin_call, app)
-        
+           
     thread_pool.wait_completion()
-
     
+    
+    
+    
+    
+    
+
+
+ 
 
 
    
